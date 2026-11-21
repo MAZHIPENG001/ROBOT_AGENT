@@ -10,9 +10,57 @@ from langchain_openai import ChatOpenAI
 
 BASE_DIR = Path(__file__).resolve().parent
 SYSTEM_PROMPT_PATH = BASE_DIR / "prompts" / "system.md"
+SKILLS_DIR = BASE_DIR / "skills"
+
+
+def load_skill_instructions() -> str:
+    """自动读取每个已安装 Skill 的 SKILL.md，组合成模型使用说明。
+
+    与 skills/registry.py 的发现规则一致：
+    只考虑 skills/ 下有 __init__.py、且目录名不以 _ 开头的子目录。
+    """
+    sections = []
+
+    if not SKILLS_DIR.is_dir():
+        raise FileNotFoundError(f"技能目录不存在：{SKILLS_DIR}")
+
+    for skill_dir in sorted(SKILLS_DIR.iterdir()):
+        if (
+            not skill_dir.is_dir()
+            or skill_dir.name.startswith("_")
+            or not (skill_dir / "__init__.py").is_file()
+        ):
+            continue
+
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.is_file():
+            print(f"[SKILL] 未找到文档：{skill_md}")
+            continue
+
+        content = skill_md.read_text(encoding="utf-8").strip()
+        if not content:
+            print(f"[SKILL] 文档为空：{skill_md}")
+            continue
+
+        sections.append(f"## {skill_dir.name}\n\n{content}")
+        print(f"[SKILL] 已读取文档：{skill_md.relative_to(BASE_DIR)}")
+
+    return "\n\n".join(sections)
 
 
 def build_agent(tools: list):
+    # 通用规则保留在 prompts/system.md；每个技能的说明来自其 SKILL.md。
+    system_prompt = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8").rstrip()
+    skill_instructions = load_skill_instructions()
+    if skill_instructions:
+        system_prompt += (
+            "\n\n# 已加载的 Skill 文档\n\n"
+            "以下内容来自本地各技能的 SKILL.md。"
+            "根据用户需求选择已注册的工具，遵循技能的适用范围和注意事项。"
+            "工具是否可执行、参数与最终结果以实际注册的工具为准。\n\n"
+            f"{skill_instructions}"
+        )
+
     model = ChatOpenAI(
         model="deepseek-chat",
         api_key=os.getenv("DEEPSEEK_API_KEY"),
@@ -22,11 +70,16 @@ def build_agent(tools: list):
     return create_agent(
         model=model,
         tools=tools,
-        system_prompt=SYSTEM_PROMPT_PATH.read_text(encoding="utf-8"),
+        system_prompt=system_prompt,
     )
 
 
-def ask_agent(agent, text: str, chat_id: str | None = None, history: list[dict] | None = None) -> str:
+def ask_agent(
+    agent,
+    text: str,
+    chat_id: str | None = None,
+    history: list[dict] | None = None,
+) -> str:
     """把历史轮次作为输入，返回本轮答案；仅打印本轮新增的工具日志。"""
     messages = []
 
