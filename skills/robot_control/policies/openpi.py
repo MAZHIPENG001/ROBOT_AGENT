@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import errno
 import io
 import json
 import os
@@ -40,7 +41,7 @@ class OpenPiPolicy:
 
     def __init__(self) -> None:
         python_raw = os.getenv("ROBOT_OPENPI_PYTHON", "").strip()
-        python = Path(python_raw).expanduser().resolve() if python_raw else Path(sys.executable)
+        python = Path(python_raw).expanduser().absolute() if python_raw else Path(sys.executable)
         if not python.is_file():
             raise FileNotFoundError(f"OpenPI Python 不存在：{python}")
 
@@ -291,12 +292,14 @@ class OpenPiWorker:
         self.ssh = None  # paramiko.SSHClient（仅在独立 worker 中导入）
         self.forward_server = None  # 监听本机 loopback 的 TCP 转发服务
         self.forward_thread = None
+        self.local_port: int | None = None  # 本进程真正使用的端口（可能是系统自动分配）
         self.client = None
         self.image_tools = None
 
     def _open_tunnel(self) -> None:
         if not self.cfg.ssh_enabled:
-            return  # 使用现有通道或直连
+            self.local_port = self.cfg.port
+            return  # 显式关闭自动 SSH 时，使用预先建立的通道或直连
 
         try:
             import paramiko
@@ -389,8 +392,21 @@ class OpenPiWorker:
                 allow_reuse_address = False
                 daemon_threads = True
 
-            # 先绑定本地端口，如果被现有 SSH 通道占用则明确报错。
-            self.forward_server = LocalForwarder((cfg.host, cfg.port), Handler)
+            # 固定端口优先；已有手动 SSH 隧道或并行推理占用该端口时，
+            # 让 OS 原子分配临时端口。不要默认复用未知来源的监听服务。
+            try:
+                self.forward_server = LocalForwarder((cfg.host, cfg.port), Handler)
+            except OSError as exc:
+                if exc.errno != errno.EADDRINUSE:
+                    raise
+                self.forward_server = LocalForwarder((cfg.host, 0), Handler)
+                print(
+                    f"[openpi_ssh] 本地 {cfg.host}:{cfg.port} 已被占用；"
+                    f"本次改用 {cfg.host}:{self.forward_server.server_address[1]}，"
+                    f"远端仍为 {cfg.ssh_remote_host}:{cfg.ssh_remote_port}",
+                    file=sys.stderr, flush=True,
+                )
+            self.local_port = int(self.forward_server.server_address[1])
             self.ssh = ssh
             self.forward_thread = threading.Thread(
                 target=self.forward_server.serve_forever,
@@ -407,6 +423,7 @@ class OpenPiWorker:
                 self.forward_server = None
             ssh.close()
             self.ssh = None
+            self.local_port = None
             raise
 
     def initialize(self) -> dict:
@@ -419,8 +436,14 @@ class OpenPiWorker:
             from openpi_client.websocket_client_policy import WebsocketClientPolicy
 
             self.image_tools = image_tools
-            self.client = WebsocketClientPolicy(self.cfg.host, self.cfg.port)
-            return {"ready": True, "action_space": self.cfg.action_space}
+            if self.local_port is None:
+                raise RuntimeError("SSH 本地转发端口未初始化")
+            self.client = WebsocketClientPolicy(self.cfg.host, self.local_port)
+            return {
+                "ready": True,
+                "action_space": self.cfg.action_space,
+                "local_port": self.local_port,
+            }
         except Exception:
             self.close()
             raise
@@ -485,6 +508,7 @@ class OpenPiWorker:
             if self.ssh is not None:
                 ssh, self.ssh = self.ssh, None
                 ssh.close()
+            self.local_port = None
 
 
 def main() -> None:
