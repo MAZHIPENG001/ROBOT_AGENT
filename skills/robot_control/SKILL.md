@@ -1,0 +1,31 @@
+# RobotControlSkill — 统一策略推理与机器人控制
+
+该 Skill 负责将 `Policy.predict(Observation) -> ActionChunk` 和 `RobotAdapter.step(action)` 组合为控制循环。策略是可替换的，例如 `openpi`、未来的 `lingbot`、`opendm`、RL 等；机器人可替换为 LIBERO、Isaac Lab、真机。**VLA 本身只推理，不能直接执行机器人动作。**
+
+## 已实现策略与机器人
+
+- `policy="openpi"`：通过独立 Python 进程运行 `openpi_client`，使用 OpenPI WebSocket 协议远程推理。Python 路径、SSH 隧道和模型服务地址从根目录 `.env` 的 `ROBOT_OPENPI_*` 配置读取。**不接受用户聊天消息指定 SSH 用户、服务器或密钥。**
+- `robot="libero"`：读取已有 LIBERO worker 的状态/双相机图像，通过现有 Unix socket 发送 `step(action)`；不会新建或重置场景。
+
+## Agent 工具
+
+- `robot_control_predict_once(robot="libero", policy="openpi", show_actions=3)`：只测试策略推理，返回动作形状，不执行动作。建议第一次使用先调用。
+- `robot_control_start(robot="libero", policy="openpi", max_steps=300, replan_steps=5)`：启动同步控制循环，异步返回 run_id，**不表示执行成功**。
+- `robot_control_status()`：查询当前执行状态、步数、错误和成功标记。
+- `robot_control_stop()`：请求停止控制线程，不等于物理急停，不能中断正在阻塞的推理。
+
+## 正常使用
+
+1. 用现有 `robot_libero_start`、`robot_libero_reset` 初始化场景；如果要显示、录制，使用已有环境工具。
+2. 确认服务器侧 OpenPI 模型服务已启动；本 Skill 可以按 `.env` 建立 SSH 端口转发，但**不负责通过 SSH 启动或训练云端模型**。
+3. 先调用 `robot_control_predict_once`，确认推理成功和动作维度/空间相符。
+4. 用户明确请求执行时，调用 `robot_control_start`，之后用 `robot_control_status` 查询结果。
+5. 必要时使用 `robot_control_stop`；录像由 robot_env Skill 负责。
+
+## 重要限制
+
+- 当前 LIBERO 默认 action_space 是 `libero_delta_pose_axisangle_gripper_7d`；即使同样是 7 维，真机也不代表可直接执行这些动作。
+- LIBERO 环境观察由 worker 翻转过 180°，OpenPI Worker 不允许再翻转。
+- 推理返回完整 action chunk，Controller 执行前 `replan_steps` 个动作后重新观测并推理。
+- 不支持 RTC 或在云端推理期间持续执行旧动作；这是同步版本。
+- 运行中禁止并行 reset/step，不允许把 agent 对话作为高速控制循环。真机必须配备独立急停、关节/末端限幅、看门狗与控制所有权机制。
