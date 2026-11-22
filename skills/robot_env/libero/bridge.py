@@ -1,6 +1,6 @@
 """LIBERO 本地 JSON-over-UNIX-socket 客户端与独立 Python worker 生命周期。
 
-这个模块只依赖 Python 标准库，可供未来的动作 Skill 直接使用：
+这个模块只依赖 Python 标准库，供环境工具及控制适配器共用：
     from skills.robot_env.libero.bridge import LiberoEnvClient
     client = LiberoEnvClient()
     obs = client.request("observe", include_images=True)

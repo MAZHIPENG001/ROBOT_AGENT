@@ -1,4 +1,4 @@
-# 默认组合；机器人/策略配置自动从 robots/*.yaml 和 policies/*.yaml 发现。
+# 默认组合；机器人/策略配置自动从 robot_env_cfg/ 和 policy_cfg/ 下递归发现 YAML。
 robot: libero
 policy: openpi
 max_steps: 300

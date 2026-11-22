@@ -1,13 +1,13 @@
 # RobotControlSkill — 统一策略推理与机器人控制
 
-该 Skill 负责将 `Policy.predict(Observation) -> ActionChunk` 和 `RobotAdapter.step(action)` 组合为控制循环。策略是可替换的，例如 `openpi`、未来的 `lingbot`、`opendm`、RL 等；机器人可替换为 LIBERO、Isaac Lab、真机。**VLA 本身只推理，不能直接执行机器人动作。**
+该 Skill 负责将 `Policy.predict(Observation) -> ActionChunk` 和 `RobotAdapter.step(action)` 组合为控制循环。策略与机器人通过配置中的驱动加载。环境启停、场景初始化、预览和录像由 `robot_env` 管理。**VLA 本身只推理，不能直接执行机器人动作。**
 
 ## 已实现策略与机器人
 
-- `policy="openpi"`：通过独立 Python 进程运行 `openpi_client`，使用 OpenPI WebSocket 协议远程推理。输入输出映射和连接参数读取 `config/policies/openpi.yaml`，其中可引用根目录 `.env` 的 `ROBOT_OPENPI_*` 变量。**不接受用户聊天消息指定 SSH 用户、服务器或密钥。**
-- `robot="libero"`：读取已有 LIBERO worker 的状态/双相机图像，通过现有 Unix socket 发送 `step(action)`；不会新建或重置场景。
+- `policy="openpi"`：通过独立 Python 进程运行 `openpi_client`，使用 OpenPI WebSocket 协议远程推理。输入输出映射和连接参数读取 `config/policy_cfg/openpi/openpi.yaml`，其中可引用根目录 `.env` 的 `ROBOT_OPENPI_*` 变量。**不接受用户聊天消息指定 SSH 用户、服务器或密钥。**
+- `robot="libero"`：使用 `robot_env/libero/adapter.py` 读取已有 worker 的状态/双相机图像，通过 Unix socket 发送 `step(action)`；不会新建或重置场景。I/O 配置读取 `config/robot_env_cfg/libero/libero.yaml`。
 
-机器人和策略从 `config/robots/`、`config/policies/` 中的 YAML 自动发现。上面是当前内置实现；
+机器人和策略从 `config/robot_env_cfg/`、`config/policy_cfg/` 及其子目录中的 `.yaml` / `.yml` 自动发现，配置按环境或策略放入对应子目录。上面是当前内置实现；
 先调用 `robot_control_list` 获取实际可用名称与 I/O 协议。省略名称和步数时使用
 `config/robot_control.yaml` 中的默认值。配置目录可由 `ROBOT_CONFIG_DIR` 指定。
 新增驱动与配置的说明见 `config/README.md`。
@@ -22,7 +22,7 @@
 
 ## 正常使用
 
-1. 查看配置并初始化对应机器人；LIBERO 使用 `robot_libero_start`、`robot_libero_reset`。如果要显示、录制，使用已有环境工具。
+1. 查看配置并通过 `robot_env` 初始化对应环境；LIBERO 需先加载场景。
 2. 确认服务器侧模型服务已启动；OpenPI 驱动可以按配置建立 SSH 端口转发，但**不负责通过 SSH 启动或训练云端模型**。
 3. 先调用 `robot_control_predict_once`，确认推理成功和动作维度/空间相符。
 4. 用户明确请求执行时，调用 `robot_control_start`，之后用 `robot_control_status` 查询结果。
@@ -32,7 +32,6 @@
 
 - 当前 LIBERO 默认 action_space 是 `libero_delta_pose_axisangle_gripper_7d`；即使同样是 7 维，真机也不代表可直接执行这些动作。
 - 创建驱动前检查机器人/策略的动作空间、动作维度、相机及状态维度；运行中检查实际数据格式。模型训练、状态含义和动作单位必须与目标机器人一致，配置不会自动转换控制语义。
-- LIBERO 环境观察由 worker 翻转过 180°，OpenPI Worker 不允许再翻转。
 - 推理返回完整 action chunk，Controller 执行前 `replan_steps` 个动作后重新观测并推理。
 - 不支持 RTC 或在云端推理期间持续执行旧动作；这是同步版本。
 - 运行中禁止并行 reset/step，不允许把 agent 对话作为高速控制循环。真机必须配备独立急停、关节/末端限幅、看门狗与控制所有权机制。

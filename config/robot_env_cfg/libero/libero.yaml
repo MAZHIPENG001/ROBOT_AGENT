@@ -1,6 +1,6 @@
 name: libero
 kind: simulation
-driver: skills.robot_control.adapters.libero:LiberoAdapter
+driver: skills.robot_env.libero.adapter:LiberoAdapter
 
 observation:
   # 逻辑名称 -> LIBERO worker JSON 字段。worker 已将图像旋转为正向 RGB。

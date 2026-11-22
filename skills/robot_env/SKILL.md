@@ -1,19 +1,28 @@
-# robot_env — 仿真环境/真机管理入口
+# robot_env — 环境生命周期、观测与录像
 
-当前已注册的环境实现：`robot_env/libero/`（导出 `LiberoSkill`）。这个一级目录文档供 `agent.py` 的 `load_skill_instructions()` 读取；原先 `libero/SKILL.md` 位于二级目录，因此不会被当前扫描逻辑自动包含。
+当前实现为 LIBERO，使用 `ROBOT_LIBERO_PYTHON` 指定的独立 Python 环境。
+本 Skill 管理场景、观测、实时预览和 MP4；策略推理与任务执行交给 `robot_control`。
+底层 `step` 由控制适配器调用，不注册为 Agent 工具。
 
-## 已注册工具（LIBERO）
+## LIBERO 工具
 
-- `robot_libero_start` / `robot_libero_stop`：管理独立 LIBERO worker。
-- `robot_libero_list_tasks`：列出任务描述和任务 ID。
-- `robot_libero_reset`：加载任务并完成初始稳定步骤。
-- `robot_libero_status` / `robot_libero_observe`：获取状态与 PNG 观测。
-- `robot_libero_display`：打开本地预览窗口。
-- `robot_libero_record_start` / `robot_libero_record_stop`：可选 MP4 录制。
-- `robot_libero_close`：关闭当前仿真场景。
+- `robot_libero_start(show_window=False, display_camera="agentview")`：启动 worker，不加载场景、不自动录像。
+- `robot_libero_list_tasks(task_suite_name="libero_spatial", start=0, limit=20)`：列出任务描述与 ID；任务集支持 `libero_spatial`、`libero_object`、`libero_goal`、`libero_10`、`libero_90`。
+- `robot_libero_reset(task_suite_name="libero_spatial", task_id=0, episode_idx=0, settle_steps=10)`：加载任务并等待物体稳定；若正在录制，先保存旧视频。
+- `robot_libero_status()`：查看服务、任务、步数、成功标记、窗口和录像状态。
+- `robot_libero_observe(save_images=True)`：读取状态，按需保存双摄像头 PNG，不推进仿真。
+- `robot_libero_display(show_window=True, camera="agentview")`：切换本机预览窗口，不改变仿真状态、不开始录像。
+- `robot_libero_record_start(fps=10, camera="agentview")`：reset 后开始录制 MP4。
+- `robot_libero_record_stop()`：结束录像并返回保存结果。
+- `robot_libero_close()`：关闭当前场景，保留 worker。
+- `robot_libero_stop()`：停止 worker 和窗口。
 
-## 与 robot_control 的分工
+## 使用约束
 
-这里只负责环境生命周期、观测、视频和底层动作执行；**Agent 不直接调用底层 step**。执行任务时先 reset，再调用 `robot_control_predict_once` 测试策略连通性，最后调用 `robot_control_start`。任务执行状态通过 `robot_control_status` 查看；停止通过 `robot_control_stop`，终止或结束后由环境 Skill 按需保存录像。不要在任务运行期间重置场景。
+- 用户要求实时显示时才打开窗口，要求录像时才在 reset 后开始录制。相机支持 `agentview`、`eye_in_hand`、`side_by_side`（双相机并排）。
+- 窗口需要本机图形桌面与支持 GUI 的 OpenCV；无头或 SSH 环境可保存 PNG / MP4。窗口显示最新观察帧，不提供网络直播，也不会自动推进仿真。
+- 录像开始时保存当前帧，此后每次底层 step 增加一帧；没有动作时可能只有一帧。`fps` 是回放帧率，不是环境执行频率。
+- 环境报告 done/success 或 close/reset/stop 时自动保存录像；控制循环达到最大步数或被人为停止后，仍需调用 `robot_libero_record_stop`。视频默认位于 `cache/libero/videos/`。
+- 控制运行期间禁止 reset 或并行 step；切换场景前先停止控制并确认线程已结束。成功与终止分别以实际返回的 `success`、`done` 为准。
 
-详细的 LIBERO 使用约束和参数说明仍位于 `robot_env/libero/SKILL.md`。
+环境安装与排障见 [LIBERO 环境准备](libero/README.md)。

@@ -71,14 +71,14 @@ class ControlRegistry:
     def __init__(self, config_dir: str | Path | None = None):
         self.config_dir = Path(config_dir or os.getenv("ROBOT_CONFIG_DIR") or DEFAULT_CONFIG_DIR).expanduser().resolve()
         self.defaults = read_config(self.config_dir / "robot_control.yaml", ControlDefaults)
-        self.robots = self._read_profiles("robots", RobotConfig)
-        self.policies = self._read_profiles("policies", PolicyConfig)
+        self.robots = self._read_profiles("robot_env_cfg", RobotConfig)
+        self.policies = self._read_profiles("policy_cfg", PolicyConfig)
         self.check_pair(self.defaults.robot, self.defaults.policy)
 
     def _read_profiles(self, directory, model):
         profiles = {}
         folder = self.config_dir / directory
-        for path in sorted([*folder.glob("*.yaml"), *folder.glob("*.yml")]):
+        for path in sorted([*folder.rglob("*.yaml"), *folder.rglob("*.yml")]):
             profile = read_config(path, model)
             if profile.name in profiles:
                 raise ValueError(f"重复的配置名称：{profile.name}")

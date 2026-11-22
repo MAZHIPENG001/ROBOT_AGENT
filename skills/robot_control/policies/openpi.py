@@ -10,7 +10,6 @@ from __future__ import annotations
 import base64
 import contextlib
 import errno
-import io
 import json
 import os
 import re
@@ -40,10 +39,7 @@ WORKER_SCRIPT = Path(__file__).resolve()
 class OpenPiPolicy:
     """同一控制任务使用一个持久的独立进程，不每步重启解释器。"""
 
-    def __init__(self, *, config: PolicyConfig | None = None) -> None:
-        if config is None:
-            from ..registry import ControlRegistry
-            config = ControlRegistry().policies["openpi"]
+    def __init__(self, *, config: PolicyConfig) -> None:
         self.config = config
         options = config.options
         allowed = set(OpenPiConfig.__dataclass_fields__) - {
@@ -516,9 +512,7 @@ class OpenPiWorker:
 
     @staticmethod
     def _decode_image(encoded: str):
-        import numpy as np
-        from PIL import Image
-        with Image.open(io.BytesIO(base64.b64decode(encoded, validate=True))) as img:
+        with Image.open(BytesIO(base64.b64decode(encoded, validate=True))) as img:
             return np.ascontiguousarray(np.asarray(img.convert("RGB"), dtype=np.uint8))
 
     def _image(self, encoded: str):
@@ -529,7 +523,6 @@ class OpenPiWorker:
         )
 
     def predict(self, observation: dict) -> dict:
-        import numpy as np
         if self.client is None:
             raise RuntimeError("OpenPI worker 尚未初始化")
         # 自己创建的 SSH 隧道需要检查 transport；复用外部端口时依赖
@@ -552,12 +545,6 @@ class OpenPiWorker:
         if not isinstance(result, dict) or self.cfg.actions_key not in result:
             raise ValueError(f"OpenPI 服务没有返回 {self.cfg.actions_key}")
         actions = np.asarray(result[self.cfg.actions_key], dtype=np.float32)
-        print(
-            f"shape={actions.shape}, expected_dim={self.cfg.action_dim}, "
-            f"nan={np.isnan(actions).sum()}, inf={np.isinf(actions).sum()}, "
-            f"bad_indices={np.argwhere(~np.isfinite(actions))[:10].tolist()}",
-            file=sys.stderr, flush=True,
-        )
         if (actions.ndim != 2 or actions.shape[1] != self.cfg.action_dim
                 or not actions.size or not np.isfinite(actions).all()):
             raise ValueError(f"OpenPI 返回无效动作形状：{actions.shape}")

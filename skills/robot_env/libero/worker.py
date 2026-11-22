@@ -1,7 +1,7 @@
 """运行在 LIBERO 的 Python 中：持有仿真状态、提供 UNIX socket JSON API。
 
 此模块不依赖 Agent、LangChain、DeepSeek 或任何 VLA。
-动作接口只有底层 step(action)，留给未来另一个 Skill 使用；本环境 Skill 不注册它。
+动作接口只有底层 step(action)，由控制适配器调用；本环境 Skill 不注册它。
 """
 from __future__ import annotations
 
@@ -395,18 +395,15 @@ class LiberoEnvironment:
         if not (save_images or include_images):
             return data
 
-        import numpy as np
         from PIL import Image
 
-        cameras = (("agentview", "agentview_image"),
-                   ("eye_in_hand", "robot0_eye_in_hand_image"))
+        cameras = ("agentview", "eye_in_hand")
         if save_images:
             directory = self.output_dir / "observations"
             directory.mkdir(parents=True, exist_ok=True)
-        for label, key in cameras:
-            # LIBERO 默认图像上下、左右翻转；参考所上传脚本旋转 180 度。
-            rgb = np.ascontiguousarray(np.asarray(self.obs[key])[::-1, ::-1])
-            im = Image.fromarray(rgb.astype(np.uint8))
+        for label in cameras:
+            rgb = self._frame(label)
+            im = Image.fromarray(rgb)
             data[f"{label}_shape"] = list(rgb.shape)
             if save_images:
                 path = directory / f"{self.episode_uid}_step{self.step_count:06d}_{label}.png"
@@ -419,7 +416,7 @@ class LiberoEnvironment:
         return data
 
     def step(self, action: list[float]) -> dict[str, Any]:
-        """仅供未来动作 Skill 调用；不会注册给 DeepSeek Agent。"""
+        """供控制适配器调用；不会注册给 DeepSeek Agent。"""
         if self.env is None:
             raise RuntimeError("场景未初始化：先 reset")
         if self.done:

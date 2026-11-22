@@ -6,8 +6,8 @@
 配置入口在 [`config/`](config/README.md)：
 
 - [`robot_control.yaml`](config/robot_control.yaml)：默认机器人、策略与控制步数。
-- [`robots/libero.yaml`](config/robots/libero.yaml)：相机、状态字段顺序、动作空间与适配器。
-- [`policies/openpi.yaml`](config/policies/openpi.yaml)：模型输入输出映射、解释器和服务连接。
+- [`robot_env_cfg/libero/libero.yaml`](config/robot_env_cfg/libero/libero.yaml)：相机、状态字段顺序、动作空间与适配器。
+- [`policy_cfg/openpi/openpi.yaml`](config/policy_cfg/openpi/openpi.yaml)：模型输入输出映射、解释器和服务连接。
 
 `.env` 中的现有连接参数继续通过 YAML 的环境变量引用生效。可使用
 `robot_control_list` 查看已配置的机器人和策略；初始化环境后，先调用

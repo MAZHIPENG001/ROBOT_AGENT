@@ -7,22 +7,16 @@ from io import BytesIO
 import numpy as np
 from PIL import Image
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from skills.robot_env.libero.bridge import LiberoEnvClient
-from ..types import Observation, StepFeedback
-from ..config import RobotConfig
+from skills.robot_control.types import Observation, StepFeedback
+from skills.robot_control.config import RobotConfig
+from .bridge import LiberoEnvClient
 
 
 class LiberoAdapter:
     action_dim = 7
     action_space = "libero_delta_pose_axisangle_gripper_7d"
 
-    def __init__(self, client: LiberoEnvClient | None = None, *, config: RobotConfig | None = None) -> None:
-        if config is None:
-            from ..registry import ControlRegistry
-            config = ControlRegistry().robots["libero"]
+    def __init__(self, client: LiberoEnvClient | None = None, *, config: RobotConfig) -> None:
         # 底层 LIBERO 控制器的物理语义不能通过改 YAML 名称而改变。
         if config.action.dim != self.action_dim or config.action.space != self.action_space:
             raise ValueError("LIBERO 配置与底层控制器的 7 维动作协议不一致")
@@ -30,10 +24,7 @@ class LiberoAdapter:
         unknown = config.options.keys() - {"socket_path", "timeout"}
         if unknown:
             raise ValueError(f"未知 LIBERO 适配器参数：{sorted(unknown)}")
-        if client is None:
-            from skills.robot_env.libero.bridge import LiberoEnvClient
-            client = LiberoEnvClient(**config.options)
-        self.client = client
+        self.client = client if client is not None else LiberoEnvClient(**config.options)
 
     @staticmethod
     def _decode_png(encoded: str) -> np.ndarray:

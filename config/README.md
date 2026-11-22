@@ -1,7 +1,7 @@
 # 机器人与策略配置
 
-`ControlRegistry` 在启动时读取本目录，自动发现 `robots/*.yaml`、`robots/*.yml`、
-`policies/*.yaml` 和 `policies/*.yml`。配置的 `name` 是工具使用的名称，不依赖文件名。
+`ControlRegistry` 在启动时读取本目录，递归发现 `robot_env_cfg/` 和 `policy_cfg/`
+下的 `*.yaml`、`*.yml`。配置按环境或策略放入对应子目录，配置的 `name` 是工具使用的名称，不依赖文件名。
 修改后重启 Agent 生效。也可通过 `.env` 的 `ROBOT_CONFIG_DIR` 指定另一个目录。
 
 ## 现有配置
@@ -9,8 +9,8 @@
 | 文件 | 作用 |
 | --- | --- |
 | `robot_control.yaml` | 默认机器人、策略、最大执行步数、每次推理后执行步数 |
-| `robots/libero.yaml` | LIBERO 驱动、相机源字段、状态拼接顺序、动作字段与空间 |
-| `policies/openpi.yaml` | 当前 OpenPI 服务的模型输入输出及连接参数 |
+| `robot_env_cfg/libero/libero.yaml` | LIBERO 驱动、相机源字段、状态拼接顺序、动作字段与空间 |
+| `policy_cfg/openpi/openpi.yaml` | 当前 OpenPI 服务的模型输入输出及连接参数 |
 
 现有 LIBERO 生命周期仍由 `robot_libero_start/reset/stop` 等环境工具负责。
 控制适配器连接已经初始化的场景，不会隐式 reset。新增环境或真机的初始化由对应驱动或管理工具负责。
@@ -36,7 +36,7 @@
 
 ## 接入另一个 OpenPI 模型服务
 
-复制 `policies/openpi.yaml` 为新文件，修改 `name`、模型输入输出和 `options`。
+将 `policy_cfg/openpi/openpi.yaml` 复制到 `policy_cfg/` 下对应策略子目录，修改 `name`、模型输入输出和 `options`。
 例如单相机、关节状态模型可以配置为下面的输入映射（维度需与实际模型一致）：
 
 ```yaml
@@ -61,7 +61,7 @@ OpenPI 负责图像缩放与 WebSocket 推理，不包含 LIBERO 字段或状态
 ## 接入新环境、真机或策略
 
 1. 实现独立 Python 驱动，并接受关键字构造参数 `config`。
-2. 为驱动添加机器人或策略 YAML，设置 `driver: 包.模块:类名`。
+2. 在 `robot_env_cfg/<环境或机器人>/` 或 `policy_cfg/<策略>/` 下为驱动添加 YAML，设置 `driver: 包.模块:类名`。
 3. 修改 `robot_control.yaml` 的默认组合，或在工具中指定对应 `robot` / `policy` 名称。
 
 机器人驱动接收 `RobotConfig`，实现以下协议：
