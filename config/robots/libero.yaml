@@ -1,0 +1,28 @@
+name: libero
+kind: simulation
+driver: skills.robot_control.adapters.libero:LiberoAdapter
+
+observation:
+  # 逻辑名称 -> LIBERO worker JSON 字段。worker 已将图像旋转为正向 RGB。
+  images:
+    primary: agentview_png_base64
+    wrist: eye_in_hand_png_base64
+  # 按以下顺序拼接统一 state；LIBERO 的两个夹爪关节使 state 为 8 维。
+  state:
+    - {name: eef_position, source: robot0_eef_pos, size: 3, unit: m}
+    - {name: eef_axisangle, source: robot0_eef_axisangle, size: 3, unit: rad}
+    - {name: gripper_position, source: robot0_gripper_qpos, size: 2, unit: m}
+  instruction: task_description
+
+action:
+  # 名称声明控制器、坐标/旋转约定及夹爪约定；相同维度不代表兼容。
+  space: libero_delta_pose_axisangle_gripper_7d
+  fields:
+    - {name: delta_position, size: 3, unit: controller_normalized}
+    - {name: delta_axisangle, size: 3, unit: controller_normalized}
+    - {name: gripper, size: 1, unit: controller_normalized}
+
+options:
+  # 留空使用 robot_env 既有的 socket 位置；环境启停仍由 robot_env 管理。
+  socket_path: ""
+  timeout: ${ROBOT_LIBERO_TIMEOUT:-120}

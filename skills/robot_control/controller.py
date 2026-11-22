@@ -6,9 +6,8 @@ import time
 import uuid
 from typing import Callable
 
-import numpy as np
-
 from .types import Policy, RobotAdapter
+from .validation import validate_action_chunk
 
 
 class RobotController:
@@ -35,9 +34,9 @@ class RobotController:
         policy_factory: Callable[[], Policy],
         *, robot_name: str, policy_name: str, max_steps: int, replan_steps: int,
     ) -> dict:
-        if not isinstance(max_steps, int) or not 1 <= max_steps <= 10000:
+        if type(max_steps) is not int or not 1 <= max_steps <= 10000:
             raise ValueError("max_steps 必须在 1~10000 之间")
-        if not isinstance(replan_steps, int) or not 1 <= replan_steps <= 100:
+        if type(replan_steps) is not int or not 1 <= replan_steps <= 100:
             raise ValueError("replan_steps 必须在 1~100 之间")
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
@@ -90,17 +89,7 @@ class RobotController:
                     self._update(success=observation.success)
                     break
                 prediction = policy.predict(observation)
-                actions = np.asarray(prediction.actions, dtype=np.float32)
-                if actions.ndim != 2 or actions.shape[1] != robot.action_dim:
-                    raise ValueError(
-                        f"策略动作形状 {actions.shape} 与机器人动作维度 {robot.action_dim} 不兼容"
-                    )
-                if prediction.action_space != robot.action_space:
-                    raise ValueError(
-                        f"策略动作空间 {prediction.action_space!r} 与机器人动作空间 {robot.action_space!r} 不匹配"
-                    )
-                if not len(actions) or not np.isfinite(actions).all():
-                    raise ValueError("策略返回空动作或非有限数值")
+                actions = validate_action_chunk(prediction, robot.action_dim, robot.action_space)
                 n = min(len(actions), replan_steps, max_steps - steps)
                 for action in actions[:n]:
                     if self._stop.is_set():

@@ -4,11 +4,17 @@
 
 ## 已实现策略与机器人
 
-- `policy="openpi"`：通过独立 Python 进程运行 `openpi_client`，使用 OpenPI WebSocket 协议远程推理。Python 路径、SSH 隧道和模型服务地址从根目录 `.env` 的 `ROBOT_OPENPI_*` 配置读取。**不接受用户聊天消息指定 SSH 用户、服务器或密钥。**
+- `policy="openpi"`：通过独立 Python 进程运行 `openpi_client`，使用 OpenPI WebSocket 协议远程推理。输入输出映射和连接参数读取 `config/policies/openpi.yaml`，其中可引用根目录 `.env` 的 `ROBOT_OPENPI_*` 变量。**不接受用户聊天消息指定 SSH 用户、服务器或密钥。**
 - `robot="libero"`：读取已有 LIBERO worker 的状态/双相机图像，通过现有 Unix socket 发送 `step(action)`；不会新建或重置场景。
+
+机器人和策略从 `config/robots/`、`config/policies/` 中的 YAML 自动发现。上面是当前内置实现；
+先调用 `robot_control_list` 获取实际可用名称与 I/O 协议。省略名称和步数时使用
+`config/robot_control.yaml` 中的默认值。配置目录可由 `ROBOT_CONFIG_DIR` 指定。
+新增驱动与配置的说明见 `config/README.md`。
 
 ## Agent 工具
 
+- `robot_control_list()`：列出已配置机器人、策略、输入输出与默认值，不返回连接凭据。
 - `robot_control_predict_once(robot="libero", policy="openpi", show_actions=3)`：只测试策略推理，返回动作形状，不执行动作。建议第一次使用先调用。
 - `robot_control_start(robot="libero", policy="openpi", max_steps=300, replan_steps=5)`：启动同步控制循环，异步返回 run_id，**不表示执行成功**。
 - `robot_control_status()`：查询当前执行状态、步数、错误和成功标记。
@@ -16,8 +22,8 @@
 
 ## 正常使用
 
-1. 用现有 `robot_libero_start`、`robot_libero_reset` 初始化场景；如果要显示、录制，使用已有环境工具。
-2. 确认服务器侧 OpenPI 模型服务已启动；本 Skill 可以按 `.env` 建立 SSH 端口转发，但**不负责通过 SSH 启动或训练云端模型**。
+1. 查看配置并初始化对应机器人；LIBERO 使用 `robot_libero_start`、`robot_libero_reset`。如果要显示、录制，使用已有环境工具。
+2. 确认服务器侧模型服务已启动；OpenPI 驱动可以按配置建立 SSH 端口转发，但**不负责通过 SSH 启动或训练云端模型**。
 3. 先调用 `robot_control_predict_once`，确认推理成功和动作维度/空间相符。
 4. 用户明确请求执行时，调用 `robot_control_start`，之后用 `robot_control_status` 查询结果。
 5. 必要时使用 `robot_control_stop`；录像由 robot_env Skill 负责。
@@ -25,6 +31,7 @@
 ## 重要限制
 
 - 当前 LIBERO 默认 action_space 是 `libero_delta_pose_axisangle_gripper_7d`；即使同样是 7 维，真机也不代表可直接执行这些动作。
+- 创建驱动前检查机器人/策略的动作空间、动作维度、相机及状态维度；运行中检查实际数据格式。模型训练、状态含义和动作单位必须与目标机器人一致，配置不会自动转换控制语义。
 - LIBERO 环境观察由 worker 翻转过 180°，OpenPI Worker 不允许再翻转。
 - 推理返回完整 action chunk，Controller 执行前 `replan_steps` 个动作后重新观测并推理。
 - 不支持 RTC 或在云端推理期间持续执行旧动作；这是同步版本。

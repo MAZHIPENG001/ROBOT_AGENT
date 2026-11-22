@@ -37,11 +37,13 @@ class StepFeedback:
 
 
 class Policy(Protocol):
+    """配置驱动构造约定：Driver(*, config: PolicyConfig)。只推理，不操作机器人。"""
     def predict(self, observation: Observation) -> ActionChunk: ...
     def close(self) -> None: ...
 
 
 class RobotAdapter(Protocol):
+    """配置驱动构造约定：Driver(*, config: RobotConfig)。资源生命周期由驱动负责。"""
     action_dim: int
     action_space: str
     def observe(self) -> Observation: ...

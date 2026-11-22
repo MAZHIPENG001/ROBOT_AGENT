@@ -1,0 +1,5 @@
+# 默认组合；机器人/策略配置自动从 robots/*.yaml 和 policies/*.yaml 发现。
+robot: libero
+policy: openpi
+max_steps: 300
+replan_steps: 5

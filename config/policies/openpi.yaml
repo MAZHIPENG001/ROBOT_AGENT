@@ -1,0 +1,37 @@
+# 这是当前 OpenPI 服务的 I/O profile；其他模型服务可复制成不同名称。
+name: openpi
+driver: skills.robot_control.policies.openpi:OpenPiPolicy
+
+inputs:
+  images:
+    primary: observation/image
+    wrist: observation/wrist_image
+  state_key: observation/state
+  instruction_key: prompt
+  state_dim: 8
+  # 可选 state_indices: [0, 1, ...]，用于按模型训练顺序选择/重排状态。
+
+outputs:
+  actions_key: actions
+  action_dim: 7
+  action_space: libero_delta_pose_axisangle_gripper_7d
+
+options:
+  # .env 继续保存机器路径及连接信息；也可以在此直接填写非敏感配置。
+  python: ${ROBOT_OPENPI_PYTHON:-}
+  host: ${ROBOT_OPENPI_HOST:-127.0.0.1}
+  port: ${ROBOT_OPENPI_PORT:-8000}
+  resize_size: ${ROBOT_OPENPI_RESIZE_SIZE:-224}
+  output_dir: ${ROBOT_OPENPI_OUTPUT_DIR:-cache/openpi}
+  start_timeout: ${ROBOT_OPENPI_START_TIMEOUT:-20}
+  request_timeout: ${ROBOT_OPENPI_REQUEST_TIMEOUT:-60}
+  ssh_enabled: ${ROBOT_OPENPI_SSH_ENABLED:-false}
+  ssh_host: ${ROBOT_OPENPI_SSH_HOST:-}
+  ssh_user: ${ROBOT_OPENPI_SSH_USER:-}
+  ssh_port: ${ROBOT_OPENPI_SSH_PORT:-22}
+  ssh_identity_file: ${ROBOT_OPENPI_SSH_IDENTITY_FILE:-}
+  ssh_remote_host: ${ROBOT_OPENPI_SSH_REMOTE_HOST:-127.0.0.1}
+  ssh_remote_port: ${ROBOT_OPENPI_SSH_REMOTE_PORT:-8000}
+  ssh_password: ${ROBOT_OPENPI_SSH_PASSWORD:-}
+  ssh_auth_method: ${ROBOT_OPENPI_SSH_AUTH_METHOD:-auto}
+  ssh_host_key_policy: ${ROBOT_OPENPI_SSH_HOST_KEY_POLICY:-strict}
