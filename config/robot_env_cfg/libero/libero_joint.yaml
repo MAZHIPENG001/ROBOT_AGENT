@@ -1,0 +1,23 @@
+name: libero_joint
+kind: simulation
+driver: skills.robot_env.libero.joint_adapter:LiberoJointAdapter
+observation:
+  images:
+    primary: agentview_png_base64
+    wrist: eye_in_hand_png_base64
+  state:
+    - {name: joint_position, source: robot0_joint_pos, size: 7, unit: rad}
+    # Value computed as sum(abs(robot0_gripper_qpos)); verify against MaaS state convention.
+    - {name: gripper_opening, source: robot0_gripper_opening, size: 1, unit: m}
+  instruction: task_description
+action:
+  space: franka_joint_target_rad_gripper_8d
+  fields:
+    - {name: joint_target, size: 7, unit: rad}
+    - {name: gripper, size: 1, unit: model_specific}
+options:
+  socket_path: ""
+  timeout: ${ROBOT_LIBERO_TIMEOUT:-120}
+  # Safeguard: read the notes and validate gripper command semantics first.
+  execution_enabled: true
+  gripper_transform: raw

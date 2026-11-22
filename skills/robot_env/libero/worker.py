@@ -60,6 +60,7 @@ class LiberoEnvironment:
         self.done = False
         self.success = False
         self.episode_uid = ""
+        self.control_mode = "osc_pose"
         # 录像是环境数据采集，与 VLA 和动作规划完全解耦。
         self._video_writer = None
         self._video_path: Path | None = None
@@ -85,6 +86,7 @@ class LiberoEnvironment:
             "pid": os.getpid(), "socket_path": str(self.output_dir / SOCKET_NAME),
             "task_suite_name": self.suite_name, "task_id": self.task_id,
             "episode_idx": self.episode_idx, "task_description": self.description,
+            "episode_uid": self.episode_uid, "control_mode": self.control_mode,
             "step_count": self.step_count, "settle_steps": self.settle_steps,
             "last_reward": self.last_reward, "done": self.done, "success": self.success,
             "recording": self._video_writer is not None,
@@ -276,6 +278,7 @@ class LiberoEnvironment:
         self.last_reward = 0.0
         self.done = self.success = False
         self.episode_uid = ""
+        self.control_mode = "osc_pose"
         self._live_frame.unlink(missing_ok=True)
         if old is not None:
             old.close()
@@ -292,9 +295,13 @@ class LiberoEnvironment:
         return False
 
     def reset(self, task_suite_name: str = "libero_spatial", task_id: int = 0,
-              episode_idx: int = 0, settle_steps: int = 10, seed: int = 7, resolution: int = 256):
+              episode_idx: int = 0, settle_steps: int = 10, seed: int = 7, resolution: int = 256,
+              control_mode: str = "osc_pose"):
         from libero.libero import get_libero_path
         from libero.libero.envs import OffScreenRenderEnv
+
+        if control_mode not in {"osc_pose", "joint_position"}:
+            raise ValueError("control_mode 必须是 osc_pose 或 joint_position")
 
         for value, name in ((task_id, "task_id"), (episode_idx, "episode_idx"),
                             (settle_steps, "settle_steps"), (seed, "seed"), (resolution, "resolution")):
@@ -335,24 +342,79 @@ class LiberoEnvironment:
             raise FileNotFoundError(f"找不到 LIBERO BDDL 文件：{bddl}")
 
         self.close()
-        env = OffScreenRenderEnv(
-            bddl_file_name=str(bddl), camera_heights=resolution, camera_widths=resolution
-        )
+        env_kwargs = {"bddl_file_name": str(bddl),
+                      "camera_heights": resolution, "camera_widths": resolution}
+        # MaaS JOINT_POSITION constructor injection (scoped).
+        # LIBERO's task wrappers supply controller_configs themselves. For
+        # robosuite builds where the constructed env does NOT expose a writable
+        # env.controller_configs, change the config at ManipulationEnv.__init__
+        # (where controller_configs is actually consumed), BEFORE robot setup.
+        # The worker is single-threaded, and the monkeypatch is always restored.
+        if control_mode == "joint_position":
+            import inspect
+            from copy import deepcopy
+            from robosuite.controllers import load_controller_config
+            from robosuite.environments.manipulation.manipulation_env import ManipulationEnv
+
+            config_joint = load_controller_config(default_controller="JOINT_POSITION")
+            original_init = ManipulationEnv.__init__
+            signature = inspect.signature(original_init)
+            if "controller_configs" not in signature.parameters:
+                raise RuntimeError(
+                    "当前 robosuite ManipulationEnv.__init__ 无 controller_configs 参数；"
+                    "请检查已安装版本的构造签名"
+                )
+            injected_calls = 0
+
+            def _joint_init(instance, *args, **kwargs):
+                nonlocal injected_calls
+                bound = signature.bind_partial(instance, *args, **kwargs)
+                # Handles both keyword and positional controller_configs.
+                bound.arguments["controller_configs"] = deepcopy(config_joint)
+                injected_calls += 1
+                return original_init(*bound.args, **bound.kwargs)
+
+            ManipulationEnv.__init__ = _joint_init
+            try:
+                env = OffScreenRenderEnv(**env_kwargs)
+            finally:
+                ManipulationEnv.__init__ = original_init
+            if injected_calls != 1:
+                env.close()
+                raise RuntimeError(
+                    f"LIBERO 关节控制器注入次数为 {injected_calls}；"
+                    "可能没有经过 robosuite ManipulationEnv.__init__，已拒绝执行"
+                )
+            logger.info("JointPosition controller config injected during environment construction")
+        else:
+            env = OffScreenRenderEnv(**env_kwargs)
         try:
             env.seed(seed)
             env.reset()
+            if control_mode == "joint_position":
+                sim = getattr(env, "env", None)
+                robots = getattr(sim, "robots", [])
+                if len(robots) != 1 or sim.action_dim != 8:
+                    raise RuntimeError("当前 LIBERO 未提供单臂 Franka 8D JOINT 控制器")
+                ctrl = getattr(robots[0], "controller", None)
+                if ctrl is None or "JointPosition" not in type(ctrl).__name__:
+                    raise RuntimeError("JOINT_POSITION 参数未生效，拒绝继续")
+                if getattr(ctrl, "input_type", "delta") != "delta":
+                    raise RuntimeError("需要 delta-input JOINT_POSITION 控制器以保持目标关节转换可预测")
             obs = env.set_init_state(initial_states[episode_idx])
             reward = 0.0
             done = False
             info: dict[str, Any] = {}
             # 参考原评测脚本，用无移动动作等待物体落稳；不属于策略或规划动作。
+            settle_action = DUMMY_ACTION if control_mode == "osc_pose" else ([0.0] * 7 + [-1.0])
             for _ in range(settle_steps):
-                obs, reward, done, info = env.step(DUMMY_ACTION)
+                obs, reward, done, info = env.step(settle_action)
         except Exception:
             env.close()
             raise
 
         self.env = env
+        self.control_mode = control_mode
         self.obs = obs
         self.suite_name = task_suite_name
         self.task_id = task_id
@@ -376,7 +438,14 @@ class LiberoEnvironment:
         quat = np.asarray(obs["robot0_eef_quat"], dtype=float).reshape(-1)
         gripper = np.asarray(obs["robot0_gripper_qpos"], dtype=float).reshape(-1)
         axisangle = _rotation_axis_angle(quat)
+        joints = np.asarray(obs.get("robot0_joint_pos", []), dtype=float).reshape(-1)
+        if joints.size not in (0, 7):
+            raise RuntimeError(f"LIBERO robot0_joint_pos unexpected size: {joints.size}")
+        # Measured finger travel in meters; confirm the scalar definition expected by MaaS.
+        opening = float(np.abs(gripper).sum())
         return {
+            "robot0_joint_pos": joints.tolist(),
+            "robot0_gripper_opening": [opening],
             "robot0_eef_pos": eef_pos.tolist(),
             "robot0_eef_quat": quat.tolist(),
             "robot0_eef_axisangle": axisangle,
@@ -415,17 +484,66 @@ class LiberoEnvironment:
                 data[f"{label}_png_base64"] = base64.b64encode(buffer.getvalue()).decode("ascii")
         return data
 
+    def _joint_target_to_action(self, action: list[float]) -> list[float]:
+        """Convert ABSOLUTE rad joint targets to JOINT_POSITION delta-controller inputs.
+
+        The MaaS absolute joint target assumption must be verified before enabling
+        execution. Gripper has already been converted to robosuite [-1,+1]
+        convention by the robot adapter.
+        """
+        import numpy as np
+
+        sim = getattr(self.env, "env", None)
+        robot = sim.robots[0] if sim is not None and getattr(sim, "robots", None) else None
+        controller = getattr(robot, "controller", None)
+        if controller is None or "JointPosition" not in type(controller).__name__:
+            raise RuntimeError("场景不在 JOINT_POSITION 控制模式，拒绝执行 8D 动作")
+        if getattr(controller, "input_type", "delta") != "delta":
+            raise RuntimeError("未处理的 JOINT_POSITION 控制器输入类型")
+        current = np.asarray(self.obs["robot0_joint_pos"], dtype=float).reshape(-1)
+        desired = np.asarray(action[:7], dtype=float)
+        if current.shape != (7,):
+            raise RuntimeError("Franka joint state 必须是 7D")
+        # Reject physically invalid targets when joint limits are supplied by robosuite.
+        limits = getattr(robot, "joint_limits", None)
+        if limits is not None:
+            lower = np.asarray(limits[0], dtype=float).reshape(-1)
+            upper = np.asarray(limits[1], dtype=float).reshape(-1)
+            if lower.shape == (7,) and upper.shape == (7,) and (
+                (desired < lower).any() or (desired > upper).any()
+            ):
+                raise ValueError("MaaS target exceeds Franka joint limits")
+
+        # Invert the controller's configured linear scale_action() mapping.
+        def as7(value):
+            return np.broadcast_to(np.asarray(value, dtype=float), (7,))
+
+        try:
+            out_lo, out_hi = as7(controller.output_min), as7(controller.output_max)
+            in_lo, in_hi = as7(controller.input_min), as7(controller.input_max)
+        except (AttributeError, ValueError) as exc:
+            raise RuntimeError("Cannot infer JOINT_POSITION controller scale from installed robosuite") from exc
+        if ((out_hi - out_lo) <= 0).any() or ((in_hi - in_lo) <= 0).any():
+            raise RuntimeError("Invalid JOINT_POSITION scaling range")
+        delta = desired - current
+        control = in_lo + (delta - out_lo) * (in_hi - in_lo) / (out_hi - out_lo)
+        control = np.clip(control, in_lo, in_hi)
+        return np.concatenate((control, [float(action[7])])).tolist()
+
     def step(self, action: list[float]) -> dict[str, Any]:
         """供控制适配器调用；不会注册给 DeepSeek Agent。"""
         if self.env is None:
             raise RuntimeError("场景未初始化：先 reset")
         if self.done:
             raise RuntimeError("当前 episode 已结束；请先 reset")
-        if not isinstance(action, list) or len(action) != 7:
-            raise ValueError("LIBERO step(action) 需要 7 个数值 [dx,dy,dz,droll,dpitch,dyaw,gripper]")
+        dim = 8 if self.control_mode == "joint_position" else 7
+        if not isinstance(action, list) or len(action) != dim:
+            raise ValueError(f"当前 {self.control_mode} 控制器需要 {dim} 维动作")
         if any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) for x in action):
-            raise ValueError("action 必须是 7 个有限数值")
-        obs, reward, done, info = self.env.step([float(x) for x in action])
+            raise ValueError("动作必须为有限数值")
+        command = (self._joint_target_to_action(action) if dim == 8
+                   else [float(x) for x in action])
+        obs, reward, done, info = self.env.step(command)
         self.obs = obs
         self.last_reward = float(reward)
         self.done = bool(done)

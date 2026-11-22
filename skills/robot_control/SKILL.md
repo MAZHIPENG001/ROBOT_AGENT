@@ -35,3 +35,20 @@
 - 推理返回完整 action chunk，Controller 执行前 `replan_steps` 个动作后重新观测并推理。
 - 不支持 RTC 或在云端推理期间持续执行旧动作；这是同步版本。
 - 运行中禁止并行 reset/step，不允许把 agent 对话作为高速控制循环。真机必须配备独立急停、关节/末端限幅、看门狗与控制所有权机制。
+
+
+## MaaS Franka Joint 适配（新增）
+
+- MaaS 是 `policy=maas`，通过 HTTPS POST `/api/v1/action` 推理；无需 SSH。
+- 仅与 `robot=libero_joint` 配对；先在环境工具执行 `robot_libero_reset(control_mode="joint_position")`。
+- 优先 `robot_control_predict_once(robot="libero_joint", policy="maas")` 验证；初始禁用动作执行。
+- 输出 8D joint 控制与旧 LIBERO OSC 7D 动作不兼容。启用前须确认关节弧度、夹爪约定、第三路相机要求及 MaaS 状态输入单位。
+
+
+## MaaS 自动切换到关节模式
+
+- 当用户选择 `policy="maas"` 且未指定 robot 时，控制工具会自动寻找唯一与 MaaS I/O 契约兼容的机器人配置；明确指定的错误组合不会被偷偷改掉。
+- 对 `robot="libero_joint"`，`robot_control_predict_once` 和 `robot_control_start` 在开始前先查询 LIBERO worker。若已加载任务但 `control_mode != "joint_position"`，将自动使用相同 `task_suite_name`、`task_id`、`episode_idx` 重置为 `joint_position`。
+- **自动重置会清空场景进度**。若正在录像、控制任务运行中或没有已加载的任务，不自动重置，返回清晰错误。未加载任务时仍需用户或 Agent 通过 `robot_libero_reset` 先选择具体任务。
+- `predict_once` 不执行机械臂动作，但可能触发一次场景重置。Agent 不需要再向用户询问是否允许切换关节模式（用户已经选择让其自动切换），但应明确告知实际是否发生重置。
+- 该功能不解除 `execution_enabled` 安全锁，不会转换动作语义。MaaS 的 8D 关节动作、夹爪编码和第三路相机占位问题必须独立验证。

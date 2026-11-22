@@ -1,0 +1,33 @@
+# MaaS dm05 with Franka JOINT. Does not change the existing OpenPI profile.
+name: maas
+# Robot policy driver: observation -> HTTP inference -> 8D action chunk.
+driver: skills.robot_control.policies.maas:MaasPolicy
+inputs:
+  images:
+    primary: cam_high
+    wrist: cam_left_wrist
+    # Do not synthesize a fake right-wrist image. If MaaS requires it,
+    # add an actual third camera to LIBERO and its robot observation profile.
+  state_key: state
+  instruction_key: prompt
+  state_dim: 8
+outputs:
+  actions_key: actions
+  action_dim: 8
+  action_space: franka_joint_target_rad_gripper_8d
+options:
+  base_url: https://maas.dexmal.com
+  api_key: ${DEXOS_API_KEY:-}
+  model_id: ${ROBOT_MAAS_MODEL_ID:-dm05}
+  robot_id: franka
+  action_type: JOINT
+  image_size: 640
+  jpeg_quality: 90
+  timeout: ${ROBOT_MAAS_TIMEOUT:-60}
+  verify_model: true
+  # Compatibility-only: single-arm LIBERO has no physical right wrist camera.
+  # This fills a required API slot with black; not evidence of valid visual semantics.
+  right_wrist_fallback: black
+  # Phase 1: do not use historical images until basic 2-view requests succeed.
+  history_size: 0
+  history_fps: 2

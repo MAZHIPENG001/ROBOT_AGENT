@@ -1,0 +1,99 @@
+"""LIBERO Franka joint-target adapter to share the existing LIBERO worker.
+
+The worker MUST have been reset with control_mode='joint_position'.
+Execution is deliberately disabled by default until control semantics are checked.
+"""
+from __future__ import annotations
+
+import numpy as np
+
+from skills.robot_control.config import RobotConfig
+from skills.robot_control.types import StepFeedback
+from skills.robot_env.libero.adapter import LiberoAdapter
+from skills.robot_env.libero.bridge import LiberoEnvClient
+
+
+class LiberoJointAdapter(LiberoAdapter):
+    action_dim = 8
+    action_space = "franka_joint_target_rad_gripper_8d"
+
+    def __init__(self, *, config: RobotConfig):
+        if config.action.dim != self.action_dim or config.action.space != self.action_space:
+            raise ValueError("libero_joint 的动作必须是 8D 关节目标协议")
+        options = config.options
+        allowed = {"socket_path", "timeout", "execution_enabled", "gripper_transform", "max_joint_delta_rad"}
+        if set(options) - allowed:
+            raise ValueError(f"libero_joint 未知 options: {sorted(set(options)-allowed)}")
+        self.config = config
+        self.client = LiberoEnvClient(
+            socket_path=options.get("socket_path") or None,
+            timeout=float(options.get("timeout", 120)),
+        )
+        self.execution_enabled = str(options.get("execution_enabled", False)).lower() in ("1", "true", "yes")
+        self.gripper_transform = str(options.get("gripper_transform", "raw"))
+        if self.gripper_transform not in {"raw", "open_fraction_0_1", "close_fraction_0_1"}:
+            raise ValueError("gripper_transform 必须为 raw/open_fraction_0_1/close_fraction_0_1")
+
+    def observe(self):
+        # The extra status call ensures that an OSC scene cannot be driven as a JOINT scene.
+        status = self.client.request("status")
+        if status.get("control_mode") != "joint_position":
+            raise RuntimeError("LIBERO 尚未用 control_mode='joint_position' 重置")
+        return super().observe()
+
+    def step(self, action):
+        if not self.execution_enabled:
+            raise RuntimeError(
+                "MaaS JOINT 执行暂时锁定。确认模型动作是绝对关节弧度和夹爪编码，"
+                "再将 config/robot_env_cfg/libero/libero_joint.yaml 中 execution_enabled 改为 true"
+            )
+        command = np.asarray(action, dtype=np.float64).copy()
+        if command.shape != (8,) or not np.isfinite(command).all():
+            raise ValueError("Franka JOINT 动作必须是 8 维有限值")
+        if (np.abs(command[:7]) > 3.3).any():
+            raise ValueError("关节目标超过粗略安全界限 ±3.3 rad")
+        g = float(command[7])
+        if self.gripper_transform == "raw":
+            if not -1 <= g <= 1:
+                raise ValueError("raw gripper 需要在 [-1,1]，请核对 MaaS 夹爪编码")
+        else:
+            if not 0 <= g <= 1:
+                raise ValueError("fraction gripper 需要在 [0,1]")
+            # robosuite Panda gripper: -1 open, +1 close (confirm in your installed version).
+            g = 1 - 2*g if self.gripper_transform == "open_fraction_0_1" else 2*g - 1
+        command[7] = g
+        # This adapter handles 8D joint targets. Calling LiberoAdapter.step()
+        # would reject them because that older method is explicitly 7D.
+        status = self.client.request("status")
+        if status.get("control_mode") != "joint_position":
+            raise RuntimeError("LIBERO 不在 joint_position 模式，拒绝执行关节动作")
+
+        # Optional conservative target-displacement gate; defaults to 0.10 rad.
+        # A large discrepancy could indicate that the model returns deltas,
+        # normalized values, or joint targets for a different reference pose.
+        observed = self.client.request("observe", include_images=False)
+        current = np.asarray(observed.get("robot0_joint_pos"), dtype=np.float64)
+        if current.shape != (7,) or not np.isfinite(current).all():
+            raise RuntimeError("无法验证当前 7D 关节位置，拒绝执行")
+        max_delta = float(self.config.options.get("max_joint_delta_rad", 0.10))
+        if not 0.0 < max_delta <= 0.5:
+            raise ValueError("max_joint_delta_rad 必须在 (0,0.5] rad 范围")
+        deviation = np.max(np.abs(command[:7] - current))
+        if deviation > max_delta:
+            raise ValueError(
+                f"MaaS 关节目标距离当前姿态过远: {deviation:.3f} rad "
+                f"> 允许的 {max_delta:.3f} rad；未执行"
+            )
+
+        # The LIBERO worker's JOINT_POSITION branch owns conversion from
+        # absolute joint targets to controller inputs, as well as joint limits.
+        result = self.client.request("step", action=command.tolist())
+        return StepFeedback(
+            done=bool(result.get("done", False)),
+            success=bool(result.get("success", False)),
+            episode_id=str(result.get("episode_uid") or ""),
+            metadata={
+                "step_count": result.get("step_count"),
+                "reward": result.get("last_reward"),
+            },
+        )

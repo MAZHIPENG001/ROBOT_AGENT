@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "apscheduler>=3.10,<4",
+    "dexos-lite>=0.2.2",
     "httpx[socks]>=0.28.1",
     "langchain>=1.5.2",
     "langchain-openai>=1.8.3",
@@ -35,7 +36,7 @@ build-backend = "hatchling.build"
 packages = ["src/vla_agent"]
 
 [[tool.uv.index]]
-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+url = "https://pypi.org/simple"
 default = true
 
 [project.scripts]

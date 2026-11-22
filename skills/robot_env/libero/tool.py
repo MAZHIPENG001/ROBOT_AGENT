@@ -52,10 +52,12 @@ class LiberoSkill:
             task_id: int = 0,
             episode_idx: int = 0,
             settle_steps: int = 10,
+            control_mode: str = "osc_pose",
         ) -> str:
             """创建或重置 LIBERO 仿真场景，选择任务与初始状态；settle_steps 为物体稳定等待步数。不会调用 VLA。"""
             return self._call("reset", task_suite_name=task_suite_name, task_id=task_id,
-                              episode_idx=episode_idx, settle_steps=settle_steps)
+                              episode_idx=episode_idx, settle_steps=settle_steps,
+                              control_mode=control_mode)
 
         @tool
         def robot_libero_observe(save_images: bool = True) -> str:

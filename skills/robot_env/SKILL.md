@@ -26,3 +26,8 @@
 - 控制运行期间禁止 reset 或并行 step；切换场景前先停止控制并确认线程已结束。成功与终止分别以实际返回的 `success`、`done` 为准。
 
 环境安装与排障见 [LIBERO 环境准备](libero/README.md)。
+
+
+## LIBERO 关节模式（新增）
+
+`robot_libero_reset` 新增 `control_mode` 可选值：`osc_pose`（默认，旧 7D 动作）和 `joint_position`（独立 8D JOINT 控制器）。关节模式供 MaaS，必须先测试推理，再校验关节单位和夹爪语义后启用执行。
