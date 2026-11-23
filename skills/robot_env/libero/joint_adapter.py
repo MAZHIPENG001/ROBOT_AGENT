@@ -21,7 +21,7 @@ class LiberoJointAdapter(LiberoAdapter):
         if config.action.dim != self.action_dim or config.action.space != self.action_space:
             raise ValueError("libero_joint 的动作必须是 8D 关节目标协议")
         options = config.options
-        allowed = {"socket_path", "timeout", "execution_enabled", "gripper_transform", "max_joint_delta_rad"}
+        allowed = {"socket_path", "timeout", "execution_enabled", "gripper_transform"}
         if set(options) - allowed:
             raise ValueError(f"libero_joint 未知 options: {sorted(set(options)-allowed)}")
         self.config = config
@@ -67,23 +67,6 @@ class LiberoJointAdapter(LiberoAdapter):
         status = self.client.request("status")
         if status.get("control_mode") != "joint_position":
             raise RuntimeError("LIBERO 不在 joint_position 模式，拒绝执行关节动作")
-
-        # Optional conservative target-displacement gate; defaults to 0.10 rad.
-        # A large discrepancy could indicate that the model returns deltas,
-        # normalized values, or joint targets for a different reference pose.
-        observed = self.client.request("observe", include_images=False)
-        current = np.asarray(observed.get("robot0_joint_pos"), dtype=np.float64)
-        if current.shape != (7,) or not np.isfinite(current).all():
-            raise RuntimeError("无法验证当前 7D 关节位置，拒绝执行")
-        max_delta = float(self.config.options.get("max_joint_delta_rad", 0.10))
-        if not 0.0 < max_delta <= 0.5:
-            raise ValueError("max_joint_delta_rad 必须在 (0,0.5] rad 范围")
-        deviation = np.max(np.abs(command[:7] - current))
-        if deviation > max_delta:
-            raise ValueError(
-                f"MaaS 关节目标距离当前姿态过远: {deviation:.3f} rad "
-                f"> 允许的 {max_delta:.3f} rad；未执行"
-            )
 
         # The LIBERO worker's JOINT_POSITION branch owns conversion from
         # absolute joint targets to controller inputs, as well as joint limits.

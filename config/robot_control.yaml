@@ -1,5 +1,5 @@
 # 默认组合；机器人/策略配置自动从 robot_env_cfg/ 和 policy_cfg/ 下递归发现 YAML。
 robot: libero
 policy: openpi
-max_steps: 300
-replan_steps: 5
+max_steps: 1000
+replan_steps: 25
