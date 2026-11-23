@@ -2,6 +2,9 @@
 # Registered automatically by ControlRegistry. No new LangChain Tool required.
 name: deepseek_vlm
 driver: skills.robot_control.policies.deepseek_vlm:DeepSeekVlmPolicy
+# Execute all 50 actions before observing again (unless stopped/done/max_steps).
+# Explicit robot_control_start(replan_steps=...) overrides this policy default.
+replan_steps: 50
 inputs:
   images:
     primary: agentview
@@ -25,7 +28,9 @@ options:
   # auto: omit max_tokens in API request; server still enforces its own limit.
   # If .env has ROBOT_VLM_MAX_TOKENS=4096, change it to auto or remove it.
   max_tokens: ${ROBOT_VLM_MAX_TOKENS:-auto}
-  # Each prediction is one vector, repeated for 2 simulator steps.
+  # Each API response must contain exactly 50 separately predicted 7D actions.
+  action_horizon: 50
+  # Repeat EACH returned row this many times; 1 means 50 simulator steps total.
   repeat_steps: 1
   # First 6 values are controller-normalized, not metric xyz/axis-angle.
   max_translation: 0.20

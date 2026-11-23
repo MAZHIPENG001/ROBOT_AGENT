@@ -22,6 +22,8 @@
 
 - 用户要求实时显示时才打开窗口，要求录像时才在 reset 后开始录制。相机支持 `agentview`、`eye_in_hand`、`side_by_side`（双相机并排）。
 - 窗口需要本机图形桌面与支持 GUI 的 OpenCV；无头或 SSH 环境可保存 PNG / MP4。窗口显示最新观察帧，不提供网络直播，也不会自动推进仿真。
+- 预览图像下方的独立黑底信息栏显示 `Steps: N`，表示当前场景已执行的动作步数；每次 step 后更新，reset 后归零，不包含 settle_steps。所有预览相机模式均显示此计数。信息栏向图像外扩展固定高度，不遮挡或裁剪仿真画面。
+- 步数下方显示最近一次成功执行的动作向量，保留三位小数：OSC 分为 xyz、rot、grip；JOINT 分为 q1–q7（关节目标，rad）和 grip，显示 worker 收到的动作值。每次动作后更新，reset 后显示 `Last action: --`；`status/query_state` 的 `last_action` 返回未舍入的完整向量。
 - 录像开始时保存当前帧，此后每次底层 step 增加一帧；没有动作时可能只有一帧。`fps` 是回放帧率，不是环境执行频率。
 - 环境报告 done/success 或 close/reset/stop 时自动保存录像；控制循环达到最大步数或被人为停止后，仍需调用 `robot_libero_record_stop`。视频默认位于 `cache/libero/videos/`。
 - 控制运行期间禁止 reset 或并行 step；切换场景前先停止控制并确认线程已结束。成功与终止分别以实际返回的 `success`、`done` 为准。

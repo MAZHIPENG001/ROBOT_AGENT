@@ -127,5 +127,7 @@ class ControlRegistry:
                         "action": r.action.model_dump(), "action_dim": r.action.dim}
                        for r in self.robots.values()],
             "policies": [{"name": p.name, "inputs": p.inputs.model_dump(),
+                          "replan_steps": (self.defaults.replan_steps
+                                           if p.replan_steps is None else p.replan_steps),
                           "outputs": p.outputs.model_dump()} for p in self.policies.values()],
         }

@@ -27,8 +27,10 @@ from skills.feishu.notify import notify_vlm_inference
 
 SYSTEM_PROMPT = """You are an experimental robot action policy for a Franka arm in LIBERO.
 You receive a task, current state and two RGB camera images.
-Your only task is to choose ONE small 7-dimensional action for the next few
-simulator steps. You are NOT given ground-truth object coordinates.
+Your only task is to choose an ordered sequence of exactly {action_horizon}
+small 7-dimensional actions. Each row is executed for {repeat_steps} simulator
+steps before advancing to the next row. You are NOT given ground-truth object
+coordinates. No new observations arrive while this sequence is executed.
 
 The LIBERO OSC_POSE action is [dx,dy,dz,drx,dry,drz,gripper].
 The first six values are NORMALIZED controller inputs, NOT meters or radians.
@@ -37,11 +39,17 @@ The gripper command is -1 for open and +1 for closed.
 The state is [eef_x,eef_y,eef_z,eef_ax,eef_ay,eef_az,finger_qpos_0,finger_qpos_1].
 Use the observations to select short, cautious movements; do not assume pixel
 positions are already 3D target coordinates. Do not invent robot geometry.
-Do not output a trajectory, a plan, Markdown, or explanation.
-Return ONLY valid JSON in this exact form:
-{"action": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0]}
+Return ONLY valid JSON with an "action" array of exactly {action_horizon} rows.
+Each row is one [dx,dy,dz,drx,dry,drz,gripper] action in execution order.
+For illustration, a TWO-action response has this structure:
+{"action": [[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0],
+            [0.01, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0]]}
+Your actual response MUST contain exactly {action_horizon} rows, not two.
+Choose each row for its point in the sequence; do not simply repeat a single
+movement to fill the array. Do not output a text plan, Markdown, or explanation.
 If uncertain, use zero translation and rotation and keep the previous gripper
-command (provided in the user observation). The action MUST have seven finite
+command (provided in the user observation) for the remaining rows.
+Every row MUST have seven finite
 JSON numbers; gripper MUST be exactly -1 or +1.
 IMPORTANT: Never exceed the per-component bounds supplied in the observation.
 """
@@ -53,7 +61,7 @@ class DeepSeekVlmPolicy:
     _ALLOWED = {
         "api_key", "base_url", "model", "timeout", "image_size",
         "jpeg_quality", "max_tokens", "repeat_steps", "max_translation",
-        "max_rotation", "max_gripper", "request_path",
+        "max_rotation", "max_gripper", "request_path", "action_horizon",
     }
     _SPACE = "libero_delta_pose_axisangle_gripper_7d"
 
@@ -89,7 +97,13 @@ class DeepSeekVlmPolicy:
                 self.max_tokens = int(token_value)
             except (TypeError, ValueError) as exc:
                 raise ValueError("max_tokens 应为整数或 auto") from exc
-        self.repeat_steps = int(opts.get("repeat_steps", 2))
+        horizon = opts.get("action_horizon", 50)
+        if isinstance(horizon, str) and horizon.strip().isdigit():
+            horizon = int(horizon)
+        if type(horizon) is not int or not 1 <= horizon <= 100:
+            raise ValueError("DeepSeek VLM action_horizon 必须为 1~100 的整数")
+        self.action_horizon = horizon
+        self.repeat_steps = int(opts.get("repeat_steps", 1))
         self.max_translation = float(opts.get("max_translation", 0.20))
         self.max_rotation = float(opts.get("max_rotation", 0.12))
         self.max_gripper = float(opts.get("max_gripper", 1.0))
@@ -121,6 +135,8 @@ class DeepSeekVlmPolicy:
         self._owns_client = client is None
         self._episode_id: str | None = None
         self._last_action = np.array([0., 0., 0., 0., 0., 0., -1.], dtype=np.float32)
+        self._last_actions: np.ndarray | None = None
+        self._last_prediction_step = 0
 
     def _encode_image(self, image: np.ndarray) -> str:
         rgb = np.asarray(image)
@@ -164,9 +180,25 @@ class DeepSeekVlmPolicy:
             raise ValueError("DeepSeek VLM 位移命令超出安全限幅，拒绝执行")
         if (np.abs(action[3:6]) > self.max_rotation + 1e-6).any():
             raise ValueError("DeepSeek VLM 旋转命令超出安全限幅，拒绝执行")
-        if float(action[6]) not in (-1.0, 1.0):
+        if raw[6] not in (-1, 1):
             raise ValueError("DeepSeek VLM 夹爪必须精确为 -1 或 +1")
         return action
+
+    def _validate_actions(self, obj: dict[str, Any]) -> np.ndarray:
+        key = self.config.outputs.actions_key
+        rows = obj.get(key)
+        if not isinstance(rows, list) or len(rows) != self.action_horizon:
+            raise ValueError(
+                f"DeepSeek VLM 必须返回恰好 {self.action_horizon} 组 7 维动作的 {key} 数组"
+            )
+        # Validate the entire chunk before making any action available to execute.
+        actions = []
+        for index, row in enumerate(rows):
+            try:
+                actions.append(self._validate_action({key: row}))
+            except ValueError as exc:
+                raise ValueError(f"DeepSeek VLM 第 {index + 1} 组动作无效: {exc}") from exc
+        return np.stack(actions)
 
     @notify_vlm_inference
     def predict(self, observation: Observation) -> ActionChunk:
@@ -175,6 +207,14 @@ class DeepSeekVlmPolicy:
         if observation.episode_id != self._episode_id:
             self._episode_id = observation.episode_id
             self._last_action = np.array([0., 0., 0., 0., 0., 0., -1.], dtype=np.float32)
+            self._last_actions = None
+        elif self._last_actions is not None:
+            # replan_steps may execute only a prefix; report the action actually
+            # reached, rather than the last row of the predicted sequence.
+            elapsed_steps = observation.step_index - self._last_prediction_step
+            if elapsed_steps > 0:
+                index = min(elapsed_steps, len(self._last_actions)) - 1
+                self._last_action = self._last_actions[index].copy()
 
         state = np.asarray(observation.state, dtype=np.float32)
         indices = self.config.inputs.state_indices
@@ -205,13 +245,17 @@ class DeepSeekVlmPolicy:
                        "rotation_abs_max_each": self.max_rotation,
                        "gripper_allowed": [-1, 1]},
             "output_json_key": self.config.outputs.actions_key,
+            "output_action_count": self.action_horizon,
+            "simulator_steps_per_action": self.repeat_steps,
         }
         content = [{"type": "text", "text": json.dumps(situation, ensure_ascii=False)},
                    *camera_content]
         payload = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": SYSTEM_PROMPT.replace(
+                    "{action_horizon}", str(self.action_horizon)
+                ).replace("{repeat_steps}", str(self.repeat_steps))},
                 {"role": "user", "content": content},
             ],
         }
@@ -253,14 +297,16 @@ class DeepSeekVlmPolicy:
                 "建议使用支持简短输出的非推理模式，或确认服务端默认输出限制"
             )
         obj = self._parse_content(msg.get("content"))
-        action = self._validate_action(obj)
-        self._last_action = action.copy()
-        actions = np.repeat(action[np.newaxis, :], self.repeat_steps, axis=0)
+        actions = self._validate_actions(obj)
+        actions = np.repeat(actions, self.repeat_steps, axis=0)
+        self._last_actions = actions.copy()
+        self._last_prediction_step = observation.step_index
         return ActionChunk(
             actions=actions,
             action_space=self.config.outputs.action_space,
             metadata={"policy": self.config.name, "model": self.model,
                       "inference_ms": round((time.monotonic()-start)*1000, 1),
+                      "action_horizon": self.action_horizon,
                       "repeat_steps": self.repeat_steps},
         )
 

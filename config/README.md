@@ -58,6 +58,22 @@ outputs:
 模型字段映射按字面键名发送；`observation/front_rgb` 是单个键，不会自动构造嵌套字典。
 OpenPI 负责图像缩放与 WebSocket 推理，不包含 LIBERO 字段或状态拼接规则。
 
+## DeepSeek VLM 批量动作
+
+DeepSeek VLM 配置 `policy_cfg/deepseek_vlm/deepseek_vlm.yaml` 默认使用
+`options.action_horizon: 50`，一次 API 请求要求返回 `{"action": [[...], ...]}`，
+即恰好 50 条 7 维动作。整个动作块通过数量、维度、有限值、位移/旋转限幅及夹爪编码
+校验后才可执行；返回数量错误、任意一条非法或响应截断时，整批拒绝执行。
+`options.repeat_steps: 1` 表示每条动作执行一步，50 条动作共执行 50 个仿真步。
+
+策略配置顶层可设置 `replan_steps`（1~100）作为该策略每次推理后的默认执行步数；
+优先级为工具显式参数 > 策略配置 > `robot_control.yaml` 的全局默认值。
+DeepSeek 设置为 50，其余策略继续使用原有全局默认值。若修改 `action_horizon`
+或 `repeat_steps`，需同步调整执行窗口；较小的 `replan_steps` 会只执行动作块前缀。
+调用 `robot_control_start(robot="libero", policy="deepseek_vlm")` 即可使用此默认值。
+达到 `max_steps`、任务成功/结束或收到停止请求时仍会提前停止。
+这 50 步之间没有新的视觉反馈，动作规划效果需在实际任务中验证。
+
 ## 接入新环境、真机或策略
 
 1. 实现独立 Python 驱动，并接受关键字构造参数 `config`。

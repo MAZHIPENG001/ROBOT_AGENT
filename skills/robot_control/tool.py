@@ -107,19 +107,22 @@ class RobotControlSkill:
             robot: str | None = None, policy: str | None = None,
             max_steps: int | None = None, replan_steps: int | None = None,
         ) -> str:
-            """启动控制循环并返回 run_id。指定 maas+libero_joint 时会在启动前检查控制模式；若已有 LIBERO 任务为 osc_pose，将自动重置同一任务为 joint_position（清空当前场景进度）。没加载任务、正在录像或正在运行控制任务时不自动重置。"""
+            """启动控制循环并返回 run_id。省略 replan_steps 时优先采用策略配置（deepseek_vlm 为 50），否则使用全局默认值。指定 maas+libero_joint 时会在启动前检查控制模式；若已有 LIBERO 任务为 osc_pose，将自动重置同一任务为 joint_position（清空当前场景进度）。没加载任务、正在录像或正在运行控制任务时不自动重置。"""
             try:
                 defaults = self.registry.defaults
                 robot, policy = self._resolve_pair(robot, policy)
                 if self.controller.running():
                     raise RuntimeError("已有控制任务正在运行，禁止自动重置场景")
                 robot_factory, policy_factory = self.registry.factories(robot, policy)
+                if replan_steps is None:
+                    policy_steps = self.registry.policies[policy].replan_steps
+                    replan_steps = defaults.replan_steps if policy_steps is None else policy_steps
                 preparation = self._auto_prepare_robot(robot)
                 return self._reply({"ok": True, "environment_preparation": preparation, **self.controller.start(
                     robot_factory, policy_factory,
                     robot_name=robot, policy_name=policy,
                     max_steps=defaults.max_steps if max_steps is None else max_steps,
-                    replan_steps=defaults.replan_steps if replan_steps is None else replan_steps,
+                    replan_steps=replan_steps,
                 )})
             except Exception as exc:
                 return self._reply({"ok": False, "error": f"{type(exc).__name__}: {exc}"})

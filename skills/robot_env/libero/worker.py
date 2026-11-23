@@ -57,6 +57,7 @@ class LiberoEnvironment:
         self.step_count = 0
         self.settle_steps = 0
         self.last_reward = 0.0
+        self.last_action: list[float] | None = None
         self.done = False
         self.success = False
         self.episode_uid = ""
@@ -90,6 +91,7 @@ class LiberoEnvironment:
             "episode_uid": self.episode_uid, "control_mode": self.control_mode,
             "step_count": self.step_count, "settle_steps": self.settle_steps,
             "last_reward": self.last_reward, "done": self.done, "success": self.success,
+            "last_action": list(self.last_action) if self.last_action is not None else None,
             "report_after_step": self.report_after_step,
             "recording": self._video_writer is not None,
             "recording_path": str(self._video_path) if self._video_path else None,
@@ -126,11 +128,50 @@ class LiberoEnvironment:
         """将最新帧原子发布给 GUI 进程；只在启用 GUI 且有场景时写入。"""
         if not self._viewer_alive() or self.obs is None:
             return
-        from PIL import Image
+        from PIL import Image, ImageDraw, ImageFont
 
         temp = self.output_dir / f".live_{uuid.uuid4().hex}.jpg"
         try:
-            Image.fromarray(self._frame(self._viewer_camera)).save(temp, format="JPEG", quality=85)
+            frame = Image.fromarray(self._frame(self._viewer_camera))
+            draw = ImageDraw.Draw(frame)
+            lines = [f"Steps: {self.step_count}"]
+            if self.last_action is None:
+                lines.append("Last action: --")
+            else:
+                values = [f"{value:.3f}" for value in self.last_action]
+                if self.control_mode == "joint_position":
+                    lines.extend([
+                        "Last action (JOINT target):",
+                        f"q1-3: [{', '.join(values[:3])}]",
+                        f"q4-6: [{', '.join(values[3:6])}]",
+                        f"q7: {values[6]}",
+                        f"grip: {values[7]}",
+                    ])
+                else:
+                    lines.extend([
+                        "Last action (OSC):",
+                        f"xyz: [{', '.join(values[:3])}]",
+                        f"rot: [{', '.join(values[3:6])}]",
+                        f"grip: {values[6]}",
+                    ])
+            label = "\n".join(lines)
+            # 为最多六行状态信息预留固定高度，动作更新时窗口尺寸保持一致。
+            panel_height = 160
+            try:
+                font = ImageFont.truetype("DejaVuSans.ttf", 18)
+                # 单相机默认仅 256px 宽，按最长一行缩小字号以显示完整向量。
+                for size in range(17, 7, -1):
+                    bounds = draw.multiline_textbbox((8, 8), label, font=font, spacing=4)
+                    if bounds[2] <= frame.width - 8 and bounds[3] <= panel_height - 8:
+                        break
+                    font = ImageFont.truetype("DejaVuSans.ttf", size)
+            except OSError:
+                font = ImageFont.load_default()
+            preview = Image.new("RGB", (frame.width, frame.height + panel_height), color="black")
+            preview.paste(frame, (0, 0))
+            draw = ImageDraw.Draw(preview)
+            draw.multiline_text((8, frame.height + 8), label, font=font, fill="white", spacing=4)
+            preview.save(temp, format="JPEG", quality=85)
             os.replace(temp, self._live_frame)
         finally:
             temp.unlink(missing_ok=True)
@@ -278,6 +319,7 @@ class LiberoEnvironment:
         self.suite_name = self.task_id = self.episode_idx = self.description = None
         self.step_count = self.settle_steps = 0
         self.last_reward = 0.0
+        self.last_action = None
         self.done = self.success = False
         self.episode_uid = ""
         self.control_mode = "osc_pose"
@@ -558,6 +600,7 @@ class LiberoEnvironment:
                    else [float(x) for x in action])
         obs, reward, done, info = self.env.step(command)
         self.obs = obs
+        self.last_action = [float(value) for value in action]
         self.last_reward = float(reward)
         self.done = bool(done)
         self.success = self._check_success(info)

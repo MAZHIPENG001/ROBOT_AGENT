@@ -105,6 +105,8 @@ class PolicyConfig(ConfigModel):
     driver: str = Field(pattern=r"^[\w.]+:[\w]+$")
     inputs: PolicyInputs
     outputs: PolicyOutputs
+    # Per-policy execution window; an explicit tool argument takes precedence.
+    replan_steps: int | None = Field(default=None, ge=1, le=100, strict=True)
     options: dict[str, Any] = Field(default_factory=dict)
 
 
