@@ -22,6 +22,7 @@ from PIL import Image, ImageOps
 
 from ..config import PolicyConfig
 from ..types import ActionChunk, Observation
+from skills.feishu.notify import notify_vlm_inference
 
 
 SYSTEM_PROMPT = """You are an experimental robot action policy for a Franka arm in LIBERO.
@@ -167,6 +168,7 @@ class DeepSeekVlmPolicy:
             raise ValueError("DeepSeek VLM 夹爪必须精确为 -1 或 +1")
         return action
 
+    @notify_vlm_inference
     def predict(self, observation: Observation) -> ActionChunk:
         if observation.done or observation.success:
             raise RuntimeError("LIBERO 任务已结束，请先 reset")

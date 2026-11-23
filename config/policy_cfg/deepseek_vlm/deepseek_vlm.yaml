@@ -26,7 +26,7 @@ options:
   # If .env has ROBOT_VLM_MAX_TOKENS=4096, change it to auto or remove it.
   max_tokens: ${ROBOT_VLM_MAX_TOKENS:-auto}
   # Each prediction is one vector, repeated for 2 simulator steps.
-  repeat_steps: 2
+  repeat_steps: 1
   # First 6 values are controller-normalized, not metric xyz/axis-angle.
   max_translation: 0.20
   max_rotation: 0.12
