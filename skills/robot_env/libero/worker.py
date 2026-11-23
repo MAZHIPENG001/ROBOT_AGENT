@@ -61,6 +61,7 @@ class LiberoEnvironment:
         self.success = False
         self.episode_uid = ""
         self.control_mode = "osc_pose"
+        self.report_after_step = False
         # 录像是环境数据采集，与 VLA 和动作规划完全解耦。
         self._video_writer = None
         self._video_path: Path | None = None
@@ -89,6 +90,7 @@ class LiberoEnvironment:
             "episode_uid": self.episode_uid, "control_mode": self.control_mode,
             "step_count": self.step_count, "settle_steps": self.settle_steps,
             "last_reward": self.last_reward, "done": self.done, "success": self.success,
+            "report_after_step": self.report_after_step,
             "recording": self._video_writer is not None,
             "recording_path": str(self._video_path) if self._video_path else None,
             "recording_frames": self._video_frames if self._video_writer is not None else 0,
@@ -454,6 +456,17 @@ class LiberoEnvironment:
             "observation_state": eef_pos.tolist() + axisangle + gripper.tolist(),
         }
 
+    def query_state(self, report_after_step: bool | None = None) -> dict[str, Any]:
+        """查询数值状态，可切换后续 step 的状态报告；不推进仿真或生成图像。"""
+        if report_after_step is not None:
+            if not isinstance(report_after_step, bool):
+                raise ValueError("report_after_step 必须是布尔值或 null")
+            self.report_after_step = report_after_step
+        data = self.status()
+        if self.env is not None and self.obs is not None:
+            data.update(self._current_state())
+        return data
+
     def observe(self, save_images: bool = False, include_images: bool = False) -> dict[str, Any]:
         """Agent 推荐 save_images=True；其他 Skill 可用 include_images=True 获取 base64 PNG。"""
         if self.env is None or self.obs is None:
@@ -561,11 +574,16 @@ class LiberoEnvironment:
         # LIBERO 环境判定成功或 episode 终止时自动保存视频。
         if (self.done or self.success) and self._video_writer is not None:
             self._finish_record("task_finished")
-        return self.status()
+        result = self.status()
+        if self.report_after_step:
+            result["state_report"] = {**result, **self._current_state()}
+        return result
 
     def dispatch(self, command: str, params: dict[str, Any]):
         if command == "status":
             return self.status()
+        if command == "query_state":
+            return self.query_state(**params)
         if command == "list_tasks":
             return self.list_tasks(**params)
         if command == "reset":

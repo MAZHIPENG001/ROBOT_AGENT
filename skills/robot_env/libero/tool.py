@@ -42,6 +42,11 @@ class LiberoSkill:
             return self._call("status")
 
         @tool
+        def robot_libero_query_state(report_after_step: bool | None = None) -> str:
+            """查询当前关节、末端位姿、夹爪及任务状态，不推进仿真、不生成图像。report_after_step=True 开启每次动作后的数值状态报告，False 关闭，省略则保持开关不变；默认关闭。报告可通过 robot_control_status 的 last_state_report 查看。未加载场景时仅返回服务和开关状态。"""
+            return self._call("query_state", report_after_step=report_after_step)
+
+        @tool
         def robot_libero_list_tasks(task_suite_name: str = "libero_spatial", start: int = 0, limit: int = 20) -> str:
             """列出 LIBERO 任务集的任务 ID 和语言描述；支持 spatial/object/goal/10/90。"""
             return self._call("list_tasks", task_suite_name=task_suite_name, start=start, limit=limit)
@@ -88,6 +93,7 @@ class LiberoSkill:
                 return json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False)
 
         return [robot_libero_start, robot_libero_display, robot_libero_status,
+                robot_libero_query_state,
                 robot_libero_list_tasks, robot_libero_reset, robot_libero_observe,
                 robot_libero_record_start, robot_libero_record_stop,
                 robot_libero_close, robot_libero_stop]

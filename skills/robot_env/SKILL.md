@@ -10,6 +10,7 @@
 - `robot_libero_list_tasks(task_suite_name="libero_spatial", start=0, limit=20)`：列出任务描述与 ID；任务集支持 `libero_spatial`、`libero_object`、`libero_goal`、`libero_10`、`libero_90`。
 - `robot_libero_reset(task_suite_name="libero_spatial", task_id=0, episode_idx=0, settle_steps=10)`：加载任务并等待物体稳定；若正在录制，先保存旧视频。
 - `robot_libero_status()`：查看服务、任务、步数、成功标记、窗口和录像状态。
+- `robot_libero_query_state(report_after_step=None)`：查询当前关节、末端位姿（位置、四元数、轴角）、夹爪和任务状态，不推进仿真、不生成图像。传 `True` 开启动作后报告，`False` 关闭，省略则只查询并保留开关；默认关闭。未加载场景时只返回服务和开关状态。
 - `robot_libero_observe(save_images=True)`：读取状态，按需保存双摄像头 PNG，不推进仿真。
 - `robot_libero_display(show_window=True, camera="agentview")`：切换本机预览窗口，不改变仿真状态、不开始录像。
 - `robot_libero_record_start(fps=10, camera="agentview")`：reset 后开始录制 MP4。
@@ -24,6 +25,7 @@
 - 录像开始时保存当前帧，此后每次底层 step 增加一帧；没有动作时可能只有一帧。`fps` 是回放帧率，不是环境执行频率。
 - 环境报告 done/success 或 close/reset/stop 时自动保存录像；控制循环达到最大步数或被人为停止后，仍需调用 `robot_libero_record_stop`。视频默认位于 `cache/libero/videos/`。
 - 控制运行期间禁止 reset 或并行 step；切换场景前先停止控制并确认线程已结束。成功与终止分别以实际返回的 `success`、`done` 为准。
+- 动作后报告开关属于 worker，适用于 OSC 与 JOINT 两种控制模式，可在控制运行期间切换，reset/close 后保留，worker 重启后恢复关闭。开启后，每次底层 `step` 在返回值的 `state_report` 中附带该步执行后的数值状态；控制适配器将其传入反馈，`robot_control_status()` 的 `last_state_report` 保存最近一步报告（不保存历史）。关闭后下一步不再生成报告，控制状态中的旧报告会在下一步清空；立即查看当前状态或开关请调用 `robot_libero_query_state()`。
 
 环境安装与排障见 [LIBERO 环境准备](libero/README.md)。
 

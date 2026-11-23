@@ -78,5 +78,6 @@ class LiberoJointAdapter(LiberoAdapter):
             metadata={
                 "step_count": result.get("step_count"),
                 "reward": result.get("last_reward"),
+                "state_report": result.get("state_report"),
             },
         )

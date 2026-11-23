@@ -98,7 +98,8 @@ class RobotController:
                     feedback = robot.step(action)
                     steps += 1
                     self._update(steps=steps, success=feedback.success,
-                                 last_reward=feedback.metadata.get("reward"))
+                                 last_reward=feedback.metadata.get("reward"),
+                                 last_state_report=feedback.metadata.get("state_report"))
                     if feedback.episode_id and episode_id and feedback.episode_id != episode_id:
                         raise RuntimeError("环境 episode 在执行期间发生变化，已停止")
                     if feedback.done or feedback.success:

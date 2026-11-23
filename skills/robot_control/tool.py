@@ -126,7 +126,7 @@ class RobotControlSkill:
 
         @tool
         def robot_control_status() -> str:
-            """查询机器人控制运行状态、执行步数、成功标志和错误信息。"""
+            """查询机器人控制运行状态、执行步数、成功标志和错误信息；LIBERO 开启动作后状态报告时，last_state_report 为最近一步的数值状态。"""
             return self._reply({"ok": True, **self.controller.status()})
 
         @tool

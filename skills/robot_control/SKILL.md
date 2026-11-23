@@ -17,7 +17,7 @@
 - `robot_control_list()`：列出已配置机器人、策略、输入输出与默认值，不返回连接凭据。
 - `robot_control_predict_once(robot="libero", policy="openpi", show_actions=3)`：只测试策略推理，返回动作形状，不执行动作。建议第一次使用先调用。
 - `robot_control_start(robot="libero", policy="openpi", max_steps=300, replan_steps=5)`：启动同步控制循环，异步返回 run_id，**不表示执行成功**。
-- `robot_control_status()`：查询当前执行状态、步数、错误和成功标记。
+- `robot_control_status()`：查询当前执行状态、步数、错误和成功标记。通过 `robot_libero_query_state(report_after_step=True)` 开启报告后，`last_state_report` 返回最近一步动作执行后的机器人与任务状态；关闭后下一步清空该报告。
 - `robot_control_stop()`：请求停止控制线程，不等于物理急停，不能中断正在阻塞的推理。
 
 ## 正常使用

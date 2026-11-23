@@ -65,7 +65,8 @@ class LiberoAdapter:
             done=bool(result.get("done", False)),
             success=bool(result.get("success", False)),
             episode_id=str(result.get("episode_uid") or ""),
-            metadata={"step_count": result.get("step_count"), "reward": result.get("last_reward")},
+            metadata={"step_count": result.get("step_count"), "reward": result.get("last_reward"),
+                      "state_report": result.get("state_report")},
         )
 
     def close(self) -> None:

@@ -1,0 +1,33 @@
+# Experimental general VLM directly predicts small LIBERO OSC_POSE actions.
+# Registered automatically by ControlRegistry. No new LangChain Tool required.
+name: deepseek_vlm
+driver: skills.robot_control.policies.deepseek_vlm:DeepSeekVlmPolicy
+inputs:
+  images:
+    primary: agentview
+    wrist: eye_in_hand
+  state_key: state
+  instruction_key: instruction
+  state_dim: 8
+outputs:
+  actions_key: action
+  action_dim: 7
+  action_space: libero_delta_pose_axisangle_gripper_7d
+options:
+  # Reuses the exact image-capable endpoint demonstrated by agent_test.py.
+  api_key: ${DEEPSEEK_API_KEY:-}
+  base_url: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+  model: ${ROBOT_VLM_MODEL:-deepseek-flash}
+  request_path: /chat/completions
+  timeout: ${ROBOT_VLM_TIMEOUT:-120}
+  image_size: 384
+  jpeg_quality: 85
+  # auto: omit max_tokens in API request; server still enforces its own limit.
+  # If .env has ROBOT_VLM_MAX_TOKENS=4096, change it to auto or remove it.
+  max_tokens: ${ROBOT_VLM_MAX_TOKENS:-auto}
+  # Each prediction is one vector, repeated for 2 simulator steps.
+  repeat_steps: 2
+  # First 6 values are controller-normalized, not metric xyz/axis-angle.
+  max_translation: 0.20
+  max_rotation: 0.12
+  max_gripper: 1.0
